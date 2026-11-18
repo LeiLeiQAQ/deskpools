@@ -1,0 +1,47 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# PyInstaller output (build/ also holds the generated version_info.txt)
+build/
+dist/
+*.spec.bak
+
+# Local release / debugging artifacts
+*.log
+update.local.json
+
+# Website source and deployment data are part of this repository.
+website/data/*.db
+ranking_server/data/*.db
+
+# Private backend state and SQLite WAL files
+website/data/admin-token.txt
+website/data/backend.pid
+website/data/*.db-*
+ranking_server/data/*.db-*
+website/data/uploads/
+
+# Never publish credentials, private backend state or local editor settings.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pid
+**/admin-token.txt
+website/data/
+ranking_server/data/
+.DS_Store
+.vscode/
+.idea/

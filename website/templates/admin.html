@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>管理后台 · 桌面图标台球</title>
+  <link rel="icon" href="/media/logo.png" type="image/png"><link rel="stylesheet" href="/static/styles.css?v=download-stats-20261118">
+</head>
+<body class="admin-page">
+  <header class="site-header"><a class="brand" href="/"><img src="/media/logo.png" alt="" width="42" height="42"><span><strong>桌面图标台球</strong><small>MANAGEMENT CONSOLE</small></span></a><a class="back-link" href="/">← 返回官网</a></header>
+  <main class="admin-main page-width">
+    <div class="admin-title"><div><p class="eyebrow">ONE DESKTOP. ONE CONSOLE.</p><h1>网站管理</h1><p>在这里管理排行榜、上传安装包、发布版本更新。</p></div><button id="logout" class="small-button" type="button" hidden>退出登录</button></div>
+    <div id="admin-status" class="status-message" role="status" hidden></div>
+    <form id="login-form" class="admin-card login-card">
+      <h2>登录管理后台</h2><p class="field-help">输入启动服务时配置的管理员令牌。自动生成的令牌保存在服务器的 admin-token.txt 文件中。</p>
+      <label>管理员令牌<input id="admin-token" type="password" autocomplete="current-password" required></label>
+      <button class="button button-primary" type="submit">进入后台 →</button>
+    </form>
+    <div id="admin-console" hidden>
+      <section class="stats-grid" aria-label="服务统计">
+        <div class="stat-card"><span>参赛玩家</span><strong id="stat-players">—</strong></div>
+        <div class="stat-card"><span>已提交成绩</span><strong id="stat-scores">—</strong></div>
+        <div class="stat-card"><span>最快平均用时</span><strong id="stat-best">—</strong></div>
+        <div class="stat-card"><span>当前版本</span><strong id="stat-version">—</strong></div>
+      </section>
+      <nav class="console-tabs" aria-label="后台导航">
+        <button type="button" data-tab="releases" aria-current="page">版本发布</button>
+        <button type="button" data-tab="downloads">下载统计</button>
+        <button type="button" data-tab="rankings">排行榜管理</button>
+        <button type="button" data-tab="settings">网站设置</button>
+      </nav>
+      <section id="tab-releases" class="console-section">
+        <div class="admin-grid">
+          <form id="release-form" class="admin-card">
+            <div class="card-heading"><h2>发布 / 编辑版本</h2><button id="new-release" class="small-button" type="button">新建版本</button></div>
+            <div class="form-row"><label>版本号<input id="release-version" value="0.2.2" pattern="^\d{1,6}\.\d{1,6}\.\d{1,6}$" required></label><label>标题<input id="release-title" maxlength="120" placeholder="桌面图标台球 0.2.2"></label></div>
+            <label>Windows 安装包<input id="release-file" type="file" accept=".exe,.msi,.zip"></label>
+            <button id="upload-package" class="small-button" type="button">上传选中的安装包</button>
+            <p id="upload-status" class="field-help upload-help" role="status">上传后将自动填写下载地址，也可填写已有的 HTTPS 下载链接。</p>
+            <label>下载地址<input id="release-url" type="text" placeholder="上传安装包后自动填写，或输入 https://…" required></label>
+            <label>更新说明<textarea id="release-notes" rows="6" maxlength="4000" placeholder="逐行填写本次更新内容"></textarea></label>
+            <label>功能亮点<textarea id="release-features" rows="3" placeholder="每行一条亮点"></textarea></label>
+            <label class="checkbox-label"><input id="release-current" type="checkbox" checked> 设为官网当前下载版本</label>
+            <button id="publish-release" class="button button-primary" type="submit">保存并发布版本 →</button>
+          </form>
+          <section class="admin-card"><div class="card-heading"><h2>安装包文件</h2><button id="refresh-files" class="small-button" type="button">刷新</button></div><p class="field-help">选择已上传的文件用于发布。下载地址随文件内容固定，旧版下载链接保持可用。</p><div id="package-files"></div></section>
+        </div>
+        <section class="admin-card history-card"><div class="card-heading"><h2>版本记录</h2><button id="refresh-releases" class="small-button" type="button">刷新</button></div><div id="admin-releases"></div></section>
+      </section>
+      <section id="tab-downloads" class="console-section" hidden>
+        <section class="admin-card">
+          <div class="card-heading"><h2>下载点击统计</h2><button id="refresh-downloads" class="small-button" type="button">刷新统计</button></div>
+          <p class="field-help">统计经由官网按钮或本站下载入口跳转的点击次数，重复点击分别计入；不代表网盘内完成下载的次数。直接打开夸克分享链接不会计入。数据从功能启用时开始累计。</p>
+          <p id="download-updated" class="field-help" role="status"></p>
+          <div class="stats-grid download-metrics" aria-label="下载点击概况">
+            <div class="stat-card"><span>累计下载点击</span><strong id="download-total">—</strong></div>
+            <div class="stat-card"><span>今日下载点击</span><strong id="download-today">—</strong></div>
+            <div class="stat-card"><span>近 7 天</span><strong id="download-week">—</strong></div>
+            <div class="stat-card"><span>近 30 天</span><strong id="download-month">—</strong></div>
+          </div>
+        </section>
+        <div class="admin-grid history-card">
+          <section class="admin-card"><div class="card-heading"><h2>按版本统计</h2></div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>版本</th><th>累计点击</th><th>今日点击</th></tr></thead><tbody id="download-versions"></tbody></table></div>
+            <div class="card-heading history-card"><h2>入口来源</h2></div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>下载入口</th><th>累计点击</th></tr></thead><tbody id="download-sources"></tbody></table></div>
+          </section>
+          <section class="admin-card"><div class="card-heading"><h2>近 14 天明细</h2></div>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>日期（北京时间）</th><th>点击次数</th></tr></thead><tbody id="download-daily"></tbody></table></div>
+          </section>
+        </div>
+      </section>
+      <section id="tab-rankings" class="console-section" hidden>
+        <section class="admin-card"><div class="card-heading"><h2>玩家成绩</h2><button id="refresh-rankings" class="small-button" type="button">刷新</button></div>
+          <p class="field-help">按「清台总用时 ÷ 图标数」排序，每位玩家的有效个人最佳进入排行榜。隐藏成绩或停用设备后，官网与游戏排行榜同步生效。</p>
+          <div class="table-scroll"><table class="data-table"><thead><tr><th>玩家 / 对手 / 提交时间</th><th>平均用时</th><th>总用时 / 图标 / 击球</th><th>状态</th><th>管理</th></tr></thead><tbody id="ranking-rows"></tbody></table></div>
+          <div class="pagination"><button id="rank-prev" class="small-button" type="button">上一页</button><span id="rank-page"></span><button id="rank-next" class="small-button" type="button">下一页</button></div>
+          <a class="text-link" href="/#rankings" target="_blank" rel="noreferrer">查看官网排行榜 ↗</a>
+        </section>
+      </section>
+      <section id="tab-settings" class="console-section" hidden>
+        <form id="flags-form" class="admin-card"><div class="card-heading"><h2>官网功能展示</h2></div><p class="field-help">控制官网功能状态展示。游戏新功能随安装包发布，客户端保持手动更新。</p>
+          <label>功能状态 JSON<textarea id="flags-json" rows="10">{}</textarea></label><button class="button button-secondary" type="submit">保存设置 →</button><div id="flags-preview" class="flags-preview"></div>
+        </form>
+      </section>
+    </div>
+  </main><script src="/static/admin.js?v=platform-20261119" defer></script>
+</body></html>

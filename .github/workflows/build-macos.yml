@@ -4,7 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - 'codex/macos-*'
+    paths:
+      - '.github/workflows/build-macos.yml'
+      - 'macos/**'
+      - 'dib/**'
+      - 'assets/**'
   pull_request:
     paths:
       - '.github/workflows/build-macos.yml'

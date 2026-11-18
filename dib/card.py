@@ -1,0 +1,360 @@
+"""The shareable result card: a 4:5 poster of a cleared round, drawn with Pillow.
+
+The card is what players screenshot and post, so it is built to stand on its own: the game's
+name and icon, the player's tier and global rank as the hero, a percentile bar, and the round's
+numbers. It carries no desktop contents (no icon names or artwork).
+
+:func:`render_card` is pure (``view`` in, image out); :func:`save_card` and :func:`copy_card`
+hand the image to the player as a PNG in Pictures or as a clipboard bitmap.
+"""
+from __future__ import annotations
+
+import io
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+from .config import DEFAULT_WEBSITE_URL
+from .modes import BOARDS
+
+WIDTH, HEIGHT = 1080, 1350
+SCALE = 2  # drawn at twice the size and shrunk back: Pillow shapes have no anti-aliasing
+
+BG_TOP = (8, 22, 20)
+BG_BOTTOM = (15, 47, 41)
+CARD = (21, 38, 35)
+TEXT = (236, 248, 243)
+MUTED = (138, 166, 158)
+ACCENT = (105, 221, 179)
+ACCENT_LIGHT = (182, 251, 224)
+GOLD = (242, 202, 135)
+
+# (minimum percentile, title, colour): the first row whose minimum is reached wins.
+TIERS = (
+    (99, '传奇球王', (242, 202, 135)),
+    (95, '桌面球王', (255, 170, 102)),
+    (85, '大师', (190, 154, 255)),
+    (65, '高手', (105, 221, 179)),
+    (40, '熟手', (140, 200, 255)),
+    (0, '新秀', (166, 186, 180)),
+)
+
+FONT_DIRECTORY = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'Fonts'
+LOGO = Path(__file__).resolve().parent.parent / 'assets' / 'desktop-icon-billiards.png'
+SHARE_URL = DEFAULT_WEBSITE_URL
+SHARE_HEADLINE = '把桌面变成你的台球桌。'
+
+
+def tier_for(percentile):
+    """The ``(title, colour)`` a player's global percentile earns."""
+    for minimum, title, colour in TIERS:
+        if percentile >= minimum:
+            return title, colour
+    return TIERS[-1][1], TIERS[-1][2]
+
+
+def _font(names, size):
+    for name in names:
+        try:
+            return ImageFont.truetype(str(FONT_DIRECTORY / name), size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size)
+
+
+def cjk(size, bold=False):
+    return _font(('msyhbd.ttc',) if bold else ('msyh.ttc', 'msyhbd.ttc'), size)
+
+
+def numerals(size):
+    """Heavy numerals; Segoe UI Bold, falling back to the CJK face when it is missing."""
+    return _font(('segoeuib.ttf', 'arialbd.ttf', 'msyhbd.ttc'), size)
+
+
+def _gradient(size, top, bottom):
+    ramp = Image.linear_gradient('L').resize(size, Image.Resampling.BILINEAR)
+    return ImageOps.colorize(ramp, top, bottom).convert('RGBA')
+
+
+def _glow(size, centre, radius, colour, strength):
+    """A soft round light: a blurred disc blended over the background."""
+    mask = Image.new('L', (size[0] // 4, size[1] // 4), 0)
+    cx, cy, r = centre[0] // 4, centre[1] // 4, radius // 4
+    ImageDraw.Draw(mask).ellipse((cx - r, cy - r, cx + r, cy + r), fill=int(255 * strength))
+    mask = mask.filter(ImageFilter.GaussianBlur(r * .55)).resize(size, Image.Resampling.BILINEAR)
+    layer = Image.new('RGBA', size, colour + (0,))
+    layer.putalpha(mask)
+    return layer
+
+
+def _text_width(draw, text, font):
+    return draw.textlength(text, font=font)
+
+
+def _fit_font(draw, text, make_font, size, max_width):
+    """The largest font up to ``size`` in which ``text`` still fits ``max_width``."""
+    while size > 20 and _text_width(draw, text, make_font(size)) > max_width:
+        size -= 4
+    return make_font(size)
+
+
+def _rounded(draw, box, radius, fill=None, outline=None, width=1):
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def _hero_rank(draw, canvas_width, y, rank, s, colour):
+    """``第 1,204 名``: the number huge, the particles small, all sharing one baseline."""
+    number = f'{rank:,}'
+    big = _fit_font(draw, number, numerals, 230 * s, 640 * s)
+    small = cjk(64 * s, bold=True)
+    gap = 14 * s
+    widths = (_text_width(draw, '第', small), _text_width(draw, number, big), _text_width(draw, '名', small))
+    left = (canvas_width - sum(widths) - 2 * gap) / 2
+    baseline = y + 220 * s
+    for text, font, width in zip(('第', number, '名'), (small, big, small), widths):
+        draw.text((left, baseline), text, font=font, fill=colour, anchor='ls')
+        left += width + gap
+    return baseline
+
+
+def render_card(view, *, when=None):
+    """Draw the result card for a ``view`` (the dict the result window is fed). Returns an RGB image.
+
+    ``view`` keys: ``time``, ``average``, ``balls``, ``shots`` (display strings) and ``rank``, a
+    dict with ``phase`` and, when ``phase == 'ok'``, the numbers ``rank``, ``percentile``,
+    ``best_rank`` and ``new_best``.
+    """
+    s = SCALE
+    width, height = WIDTH * s, HEIGHT * s
+    rank = view.get('rank') or {'phase': 'unavailable'}
+    sprint = view.get('mode') == 'sprint'
+    ranked = rank.get('phase') == 'ok'
+    tier, tier_colour = tier_for(rank['percentile']) if ranked else (None, ACCENT)
+
+    canvas = _gradient((width, height), BG_TOP, BG_BOTTOM)
+    canvas.alpha_composite(_glow((width, height), (width // 2, 520 * s), 520 * s, tier_colour, .34))
+    canvas.alpha_composite(_glow((width, height), (width - 40 * s, height - 120 * s), 460 * s, ACCENT, .16))
+    decoration = Image.new('RGBA', (width, height))
+    deco = ImageDraw.Draw(decoration)
+    for cx, cy in ((0, 0), (width, 0), (0, height), (width, height)):  # four pockets in the corners
+        for radius, alpha in ((210, 20), (150, 14)):
+            r = radius * s
+            deco.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(105, 221, 179, alpha), width=3 * s)
+    canvas.alpha_composite(decoration)
+    draw = ImageDraw.Draw(canvas)
+    margin = 96 * s
+
+    # -- header: icon, name, date --------------------------------------------------
+    try:
+        with Image.open(LOGO) as source:
+            logo = source.convert('RGBA').resize((80 * s, 80 * s), Image.Resampling.LANCZOS)
+        canvas.alpha_composite(logo, (margin, 82 * s))
+    except OSError:
+        pass
+    draw.text((margin + 104 * s, 82 * s), '桌面图标台球', font=cjk(46 * s, bold=True), fill=TEXT)
+    draw.text((margin + 106 * s, 144 * s), '把桌面图标打成一局台球', font=cjk(24 * s), fill=MUTED)
+    when = when or time.localtime()
+    draw.text((width - margin, 92 * s), time.strftime('%Y.%m.%d', when), font=numerals(26 * s), fill=MUTED, anchor='ra')
+
+    # -- hero ----------------------------------------------------------------------
+    centre = width / 2
+    if ranked:
+        badge_font = cjk(40 * s, bold=True)
+        badge_width = _text_width(draw, tier, badge_font) + 96 * s
+        box = (centre - badge_width / 2, 270 * s, centre + badge_width / 2, 348 * s)
+        # Translucent shapes go on their own layer: drawing RGBA fills straight onto the canvas
+        # would overwrite the pixels instead of blending with them.
+        layer = Image.new('RGBA', canvas.size)
+        _rounded(ImageDraw.Draw(layer), box, 39 * s, fill=tier_colour + (46,))
+        canvas.alpha_composite(layer)
+        draw.text((centre, 309 * s), tier, font=badge_font, fill=tier_colour, anchor='mm')
+        draw.text((centre, 408 * s), '本局全球排名', font=cjk(30 * s), fill=MUTED, anchor='mm')
+        _hero_rank(draw, width, 420 * s, rank['rank'], s, tier_colour)
+        parts = (('超过  ', cjk(32 * s)), (f'{rank["percentile"]}%', numerals(110 * s)),
+                 ('  的全球玩家', cjk(32 * s)))
+        lengths = [_text_width(draw, text, font) for text, font in parts]
+        x = (width - sum(lengths)) / 2
+        for (text, font), length in zip(parts, lengths):
+            draw.text((x, 828 * s), text, font=font, fill=ACCENT_LIGHT if '%' in text else TEXT, anchor='ls')
+            x += length
+        # Keep the percentile as a visual measure as well as a number.  The
+        # filled segment is deliberately below the hero text so it remains
+        # legible on compact previews and on the saved 4:5 poster.
+        bar_left, bar_right = margin, width - margin
+        bar_top, bar_bottom = 868 * s, 892 * s
+        _rounded(draw, (bar_left, bar_top, bar_right, bar_bottom), 12 * s,
+                 fill=(34, 67, 58, 255), outline=(60, 105, 90, 255), width=2 * s)
+        percent = max(0, min(100, int(rank['percentile'])))
+        fill_right = bar_left + (bar_right - bar_left) * percent / 100
+        if percent:
+            _rounded(draw, (bar_left, bar_top, max(bar_left + 12 * s, fill_right), bar_bottom),
+                     12 * s, fill=tier_colour + (255,))
+    else:
+        draw.text((centre, 300 * s), '90 秒挑战进球' if sprint else '平均每颗用时', font=cjk(34 * s), fill=MUTED, anchor='mm')
+        value = str(view['pocketed']) if sprint else view['average']
+        big = _fit_font(draw, value, numerals, 250 * s, 680 * s)
+        draw.text((centre - 30 * s, 520 * s), value, font=big, fill=ACCENT, anchor='ms')
+        draw.text((centre + _text_width(draw, value, big) / 2 - 10 * s, 520 * s), '球' if sprint else '秒', font=cjk(64 * s, bold=True),
+                  fill=ACCENT, anchor='ls')
+        message = {'pending': '正在提交成绩，稍后显示全球排名', 'off': '开启「全球排名」，看看你超过了多少玩家'}.get(
+            rank.get('phase'), rank.get('message') or '')
+        if message:
+            font = cjk(30 * s)
+            pill_width = min(width - 2 * margin, _text_width(draw, message, font) + 80 * s)
+            _rounded(draw, (centre - pill_width / 2, 620 * s, centre + pill_width / 2, 690 * s), 35 * s,
+                     fill=(31, 55, 51, 255), outline=(60, 100, 92, 255), width=2 * s)
+            draw.text((centre, 655 * s), message, font=font, fill=MUTED, anchor='mm')
+
+    # -- the numbers ---------------------------------------------------------------
+    efficiency = ('进球率', f'{int(view["pocketed"]) / max(1,int(view["balls"])) * 100:.0f}', '%') if sprint else ('平均每颗', view['average'], '秒')
+    tiles = (('总用时', view['time'], ''), efficiency,
+             ('图标', view['balls'], '颗'), ('击球', view['shots'], '杆'))
+    tile_width = (width - 2 * margin) / 4
+    draw.line((margin, 940 * s, width - margin, 940 * s), fill=(48, 84, 76), width=2 * s)
+    for index, (label, value, unit) in enumerate(tiles):
+        x = margin + index * tile_width
+        draw.text((x, 986 * s), label, font=cjk(27 * s), fill=MUTED)
+        font = _fit_font(draw, value, numerals, 42 * s, tile_width - 42 * s)
+        draw.text((x, 1080 * s), value, font=font, fill=TEXT, anchor='ls')
+        if unit:
+            draw.text((x + 8 * s + _text_width(draw, value, font), 1080 * s), unit, font=cjk(24 * s),
+                      fill=MUTED, anchor='ls')
+
+    if ranked:
+        text = f'个人最佳  {rank["best_rank"]:,} 名'
+        draw.text((margin, 1186 * s), text, font=_fit_font(draw, text, cjk, 34 * s, 690 * s), fill=ACCENT_LIGHT, anchor='lm')
+        if rank.get('new_best'):
+            font = cjk(30 * s, bold=True)
+            pill = _text_width(draw, '新纪录', font) + 56 * s
+            x1 = width - margin
+            stem_x = (x1 - pill) / s - 30
+            draw.line(((stem_x + 9) * s, 1205 * s, (stem_x - 5) * s, 1168 * s), fill=GOLD, width=2 * s)
+            for offset in (0, 12, 24):
+                y = 1200 - offset
+                x = stem_x + 7 - offset / 3
+                for side in (-1, 1):
+                    draw.polygon(((x * s, y * s), ((x + side * 12) * s, (y - 5) * s),
+                                  ((x + side * 14) * s, (y - 17) * s), ((x + side * 4) * s, (y - 11) * s)),
+                                 fill=GOLD)
+            _rounded(draw, (x1 - pill, 1156 * s, x1, 1216 * s), 30 * s, fill=GOLD + (255,))
+            draw.text((x1 - pill / 2, 1186 * s), '新纪录', font=font, fill=(40, 28, 8), anchor='mm')
+
+    draw.line((margin, 1252 * s, width - margin, 1252 * s), fill=(48, 84, 76), width=2 * s)
+    draw.text((centre, 1282 * s), SHARE_HEADLINE, font=cjk(23 * s), fill=MUTED, anchor='mm')
+    draw.text((centre, 1320 * s), SHARE_URL, font=numerals(28 * s), fill=ACCENT_LIGHT, anchor='mm')
+    return canvas.convert('RGB').resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
+
+
+def leaderboard_copy(board):
+    """Standalone copy for the same snapshot as the poster; no invented player result."""
+    text = ('桌面图标台球｜' + SHARE_HEADLINE + '\n'
+            '按住蓄力，松开击球；F1 随时暂停隐藏。\n'
+            '清台后查看全球排名，刷新自己的最佳成绩。')
+    mine = board.get('me')
+    if mine:
+        value = f'{mine.get("pocketed",0)} 球' if board.get('board') == 'sprint' else f'{mine["avg_ms"] / 1000:.2f} 秒/颗'
+        text += f'\n我的最佳：第 {mine["rank"]:,} 名，{value}。'
+    if board.get('board'):
+        text += f'\n榜单：{BOARDS[board["board"]]} · 规则 v{board.get("rules_version",1)}。'
+    if board.get('generated_players'):
+        text += f'\n当前榜单：{board["real_players"]} 位玩家、{board["generated_players"]} 个电脑对手。'
+    return text + '\n官网：' + SHARE_URL
+
+
+def render_leaderboard_card(board):
+    """A 4:5 poster from an actual ranking response, including source labels and date."""
+    s = SCALE
+    width, height = WIDTH * s, HEIGHT * s
+    canvas = _gradient((width, height), BG_TOP, BG_BOTTOM)
+    canvas.alpha_composite(_glow((width, height), (width, 200 * s), 600 * s, ACCENT, .25))
+    draw = ImageDraw.Draw(canvas)
+    margin = 72 * s
+    with Image.open(LOGO) as source:
+        logo = source.convert('RGBA').resize((68 * s, 68 * s), Image.Resampling.LANCZOS)
+    canvas.alpha_composite(logo, (margin, 64 * s))
+    draw.text((margin + 90 * s, 67 * s), '桌面图标台球', font=cjk(34 * s, bold=True), fill=TEXT)
+    draw.text((margin + 92 * s, 117 * s), 'DESKTOP ICON BILLIARDS', font=numerals(16 * s), fill=MUTED)
+    draw.text((margin, 206 * s), '这一杆，', font=cjk(86 * s, bold=True), fill=TEXT)
+    draw.text((margin, 317 * s), '轮到你上榜。', font=cjk(86 * s, bold=True), fill=ACCENT_LIGHT)
+    draw.text((margin, 444 * s), '把桌面图标打成台球，把清台成绩打上榜。', font=cjk(28 * s), fill=MUTED)
+
+    _rounded(draw, (margin, 520 * s, width - margin, 1082 * s), 28 * s,
+             fill=CARD + (255,), outline=(48, 84, 76, 255), width=2 * s)
+    draw.text((margin + 30 * s, 552 * s), BOARDS.get(board.get('board'),'全球排行榜'), font=cjk(31 * s, bold=True), fill=TEXT)
+    draw.text((width - margin - 30 * s, 555 * s), 'TOP 5', font=numerals(26 * s), fill=GOLD, anchor='ra')
+    total = board.get('total_players', len(board['entries']))
+    generated = board.get('generated_players', 0)
+    participants = (f'{board["real_players"]} 位玩家 · {generated} 个电脑对手' if generated
+                    else f'{total} 位玩家参与')
+    sprint = board.get('board') == 'sprint'
+    draw.text((margin + 30 * s, 606 * s), participants + (' · 90秒进球数' if sprint else ' · 平均每颗用时'), font=cjk(21 * s), fill=MUTED)
+    for index, entry in enumerate(board['entries'][:5]):
+        y = (666 + index * 78) * s
+        colour = GOLD if index == 0 else TEXT
+        if index:
+            draw.line((margin + 30 * s, y - 8 * s, width - margin - 30 * s, y - 8 * s),
+                      fill=(39, 67, 59), width=s)
+        draw.text((margin + 30 * s, y + 3 * s), f'{entry["rank"]:02}', font=numerals(35 * s), fill=colour)
+        computer = entry.get('source') == 'generated'
+        name = entry['display_name'] if computer else entry['ip_address'] or '历史 IP 未记录'
+        detail = f'{entry["skill_label"]} · 电脑对手' if computer else entry['os_name'] or '历史系统未记录'
+        font = _fit_font(draw, name, lambda size: cjk(size, bold=True), 28 * s, 540 * s)
+        draw.text((margin + 105 * s, y), name, font=font, fill=TEXT)
+        draw.text((margin + 105 * s, y + 39 * s), detail,
+                  font=_fit_font(draw, detail, cjk, 19 * s, 540 * s), fill=MUTED)
+        draw.text((width - margin - 30 * s, y + 3 * s), str(entry.get('pocketed',0)) if sprint else f'{entry["avg_ms"] / 1000:.2f}',
+                  font=numerals(34 * s), fill=colour, anchor='ra')
+        draw.text((width - margin - 30 * s, y + 43 * s), '进球' if sprint else '秒/颗', font=cjk(17 * s), fill=MUTED, anchor='ra')
+    if not board['entries']:
+        draw.text((width / 2, 820 * s), '首个上榜席位，等你来拿。', font=cjk(36 * s, bold=True), fill=TEXT, anchor='mm')
+    stamp = datetime.fromisoformat(board['generated_at'].replace('Z', '+00:00')).astimezone()
+    draw.text((margin + 30 * s, 1047 * s), f'榜单快照 {stamp:%Y.%m.%d %H:%M} · 在游戏中查看最新排名',
+              font=cjk(18 * s), fill=MUTED)
+    draw.text((margin, 1121 * s), '清空桌面，刷新自己的最佳。', font=cjk(32 * s, bold=True), fill=TEXT)
+    draw.text((margin, 1183 * s), '按住蓄力 · 松开击球 · 快捷键随时暂停', font=cjk(25 * s), fill=MUTED)
+    _rounded(draw, (margin, 1240 * s, width - margin, 1310 * s), 18 * s, fill=ACCENT + (255,))
+    draw.text((width / 2, 1275 * s), SHARE_URL, font=numerals(35 * s), fill=BG_TOP, anchor='mm')
+    return canvas.convert('RGB').resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
+
+
+# -- handing the card to the player ----------------------------------------------------------
+def pictures_directory():
+    """``%USERPROFILE%\\Pictures\\DesktopIconBilliards``, falling back to the home folder."""
+    home = Path(os.environ.get('USERPROFILE') or Path.home())
+    base = home / 'Pictures'
+    return (base if base.is_dir() else home) / 'DesktopIconBilliards'
+
+
+def save_card(image, directory=None, when=None, *, kind='成绩'):
+    """Write the card as a PNG and return its path."""
+    directory = Path(directory) if directory else pictures_directory()
+    directory.mkdir(parents=True, exist_ok=True)
+    if kind not in ('成绩', '排行榜'):
+        raise ValueError('Unknown card kind')
+    path = directory / f'桌面图标台球-{kind}-{time.strftime("%Y%m%d-%H%M%S", when or time.localtime())}.png'
+    image.save(path, 'PNG', optimize=True)
+    return path
+
+
+def dib_bytes(image):
+    """The card as clipboard ``CF_DIB`` data: a BMP without its 14-byte file header."""
+    buffer = io.BytesIO()
+    image.convert('RGB').save(buffer, 'BMP')
+    return buffer.getvalue()[14:]
+
+
+def copy_card(image):
+    """Put the card on the clipboard as a bitmap so it can be pasted straight into a chat."""
+    import win32clipboard
+    import win32con
+
+    data = dib_bytes(image)
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_DIB, data)
+    finally:
+        win32clipboard.CloseClipboard()

@@ -1,0 +1,62 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-windows.yml'
+      - 'dib/**'
+      - 'assets/**'
+      - 'website/**'
+      - 'ranking_server/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'app.pyw'
+      - 'build.ps1'
+      - 'DesktopIconBilliards.spec'
+      - 'requirements*.txt'
+  pull_request:
+    paths:
+      - '.github/workflows/build-windows.yml'
+      - 'dib/**'
+      - 'tests/**'
+      - 'website/**'
+      - 'ranking_server/**'
+      - 'requirements*.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install pinned build dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+      - name: Run regression suite
+        run: |
+          .\.venv\Scripts\python.exe -m unittest discover -s tests -t . -v
+          if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed' }
+      - name: Build Windows x64 executable
+        run: ./build.ps1 -SkipDeps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskPools-Windows-x64
+          path: |
+            dist/*-win-x64.exe
+            dist/*-win-x64.exe.sha256
+          if-no-files-found: error
