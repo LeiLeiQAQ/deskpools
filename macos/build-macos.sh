@@ -34,3 +34,6 @@ ditto -c -k --sequesterRsrc --keepParent "$app" "$stage/app.zip"
 mv -f "$stage/app.zip" "$archive"
 shasum -a 256 "$archive"
 printf 'Built %s\n' "$archive"
+
+"$venv_python" "$root/macos/package-dmg.py" --app "$app" --arch "$arch" --version "$version" \
+  --output "$dist/DesktopIconBilliards-$version-macos-$arch.dmg"

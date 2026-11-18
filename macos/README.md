@@ -9,6 +9,14 @@ Mac 版通过 AppKit 读取 Finder 桌面项目的原生图标，把图标绘制
 
 ## 构建与验证
 
+## DMG 安装
+
+根据 Mac 的芯片选择 arm64（Apple 芯片）或 x86_64（Intel）DMG。双击打开安装盘，把应用拖入旁边的 Applications 文件夹；复制完成后弹出安装盘，再从“应用程序”启动。
+
+构建流程会同时生成 ZIP 和 DMG。DMG 中含应用、Applications 快捷方式、中文安装说明，并在上传前执行完整性校验、只读挂载、架构与签名检查及已挂载应用自检。测试包尚未完成 Developer ID 签名和 Apple 公证。
+
+## 源码构建
+
 在有 Python 3.13 和 Xcode 命令行工具的 Mac 上，从仓库根目录执行：
 
 ```sh
