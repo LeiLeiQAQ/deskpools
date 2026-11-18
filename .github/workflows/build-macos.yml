@@ -1,0 +1,41 @@
+name: Build macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/macos-*'
+  pull_request:
+    paths:
+      - '.github/workflows/build-macos.yml'
+      - 'macos/**'
+      - 'dib/**'
+      - 'assets/**'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: macos/requirements.txt
+      - run: bash macos/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskPools-macOS-${{ matrix.arch }}
+          path: dist/macos/*.zip
+          if-no-files-found: error

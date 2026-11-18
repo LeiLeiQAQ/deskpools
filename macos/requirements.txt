@@ -1,0 +1,6 @@
+Pillow==13.0.0
+pygame-ce==2.5.7
+pyobjc-core==13.0
+pyobjc-framework-Cocoa==13.0
+pyobjc-framework-Quartz==13.0
+pyinstaller==6.22.3
