@@ -22,7 +22,7 @@ venv_python="$work/venv/bin/python"
 binary="$app/Contents/MacOS/DesktopIconBilliards"
 arch="$("$venv_python" -c 'import platform; print(platform.machine())')"
 version="$("$venv_python" -c 'from dib import __version__; print(__version__)')"
-lipo -verify_arch "$arch" "$binary"
+lipo "$binary" -verify_arch "$arch"
 codesign --verify --deep --strict "$app"
 plutil -lint "$app/Contents/Info.plist"
 SDL_AUDIODRIVER=dummy "$binary" --check-runtime
